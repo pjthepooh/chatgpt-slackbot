@@ -1,0 +1,131 @@
+Adroit Batch Inference User Guide
+Adroit Batch Inference allows developers to make inferences on their model in batch offline. There exists two workflows that are supported:
+
+sagemaker-notebooks
+data-bridge
+This document serves as a starter guide on getting familiar with Adroit Batch Inference on the data lake.
+
+Purpose
+Users can produce inferences without requiring online serving infrastructure. This comes with a few benefits:
+
+No online infrastructure -> No online infrastructure alarms
+Ramping up capacity is trivial
+A Data Lake interface
+If the problem-space requires an online synchronous path, do not use this.
+
+Prerequisites
+Models must be trained through the Sagemaker training flow. See the Metaflow user guide for more information.
+Your handler must be flask-compatible. An example of how to implement this can be found here.
+Set up
+After publishing the project with your service handler, include a flavor entry into flavors.yaml. Add offline_only: true if online infrastructure isn't required. Adroit Batch Serving uses this flavor definition to configure the web service.
+
+Inferences as Bridge Configuration
+After the flavor definition is commited to main, it becomes available for use in data-bridge. By using the Adroit extraction engine on data-bridge, batch-inference production in the data lake becomes possible.
+
+We expose the following configuration to use to your heart's content.
+
+model_name: the name of the Adroit model.
+version: The version of the Adroit model.
+flavor: This is the flavor name reference in adroit/flavors.yaml.
+sql: A body of Spark SQL used for feature request creation.
+(Optional) instance_type: Specify the instance type to generate inferences. (Default=ml.c5.xlarge). See the Sagemaker pricing page to see what's available.
+(Optional) max_instance_count: Specify the max number of instances for more parallelization. (Default=1)
+(Optional) request_file_size_mb: Maximum size of data files before splitting. (Default=5)
+(Optional) request_batch_size: Size of batches of features that will get sent to the batch transformer all at once.
+(Optional) image: Specify custom conda env image here, see Custom Conda Environments User Guide.
+Advanced Features:
+
+(Optional) spark_arguments: Spark config overrides used for feature creation.
+Bridge Configuration Example
+See example_sklearn_adroit_scores for an example.
+
+Testing your Bridge Job
+To test your bridge job, we recommend the following two steps:
+
+First test your spark SQL in Qubole to make sure your query for getting your features works as intended
+Test the full batch inference job on Airflow staging. Data engineering has instructions for this process here. This will run the full job and create a staging data lake table that you can sanity check. It will also allow you to adjust resources if the job is running too slowly.
+A batch inference bridge job is composed of the following three steps, any of which can fail:
+
+Spark job to collect features
+Sagemaker batch inference job
+Spark job to combine features and inferences
+Debugging the spark jobs: In the airflow logs on staging, search for 'Permalink'. There should be two hits giving the qubole command links for steps 1 and 3 respectively (unless failed before getting to step 3). Follow the link to debug the spark job in the qubole interface (the results tab will list the error).
+
+Debugging the batch inference job: The list of batch inference jobs can be found here. Note that you must be logged into AWS-Data via Okta (Not engineering). You can see here the status of the job including how long it ran and whether it completed or failed. Additionally there are logs associated with the job, but these are generally not very interpretable. Instead you can review the exact error on Sentry here. You can also take a look at the input features by navigating to the s3 bucket listed in the qubole command in step 1 to make sure the input data looks as expected.
+
+Estimating Cost of Batch Inference
+If you want to estimate the approximate cost of running the sagemaker batch inference job, you first must find the relevant job listed here.
+
+Then you can compute the cost as: instance_price x duration (hours) x instance_count
+
+The instance type, instance count, and duration are listed on the detailed view of the job. You can look up the instance cost per hour at https://aws.amazon.com/sagemaker/pricing/.
+
+You then multiply by whatever frequency you plan to run at to get a yearly cost. Note that the overall cost of the bridge job will also include the costs associated with running the spark commands.
+
+Inferences-as-a-library-call
+Since Adroit is available as a library and contains the batch_transformer module, The class BatchTransformer can be used for interactive work. Please start your search there.
+
+Pre-requisites
+Currently, our AWS policies support Sagemaker notebook development workflows.
+
+If you need to use this to other services, the nd-sagemaker-batch-transform-access policy must be attached to your project.
+
+Set up
+Follow the installation instruction for installing Adroit as a library onto your Sagemaker notebook. You will also need to pip install sagemaker as this is not included with the adroit package.
+Collect your IAM role and S3 bucket that comes with your Sagemaker notebook distribution on the AWS/Engineering account. Check out this link for a video tutorial on how to find these resources.
+import adroit.batch_transformer and use the library.
+Inferences-as-a-library-call Example
+The code below is an example of a call made within a Sagemaker-notebook context.
+
+.. code-block:: python
+
+    from adroit.batch_transformer import BatchTransformer
+    with BatchTransformer(
+        model_name='example_sklearn',
+        version='f549d299-d1b7-4f25-b380-6919c9fc7161',
+        flavor_name='example',
+        bucket_name='notebook-server-staging-us1-scottno-scratchbucket-yrnfzyugyhp6',
+        role_arn='arn:aws:iam::364942603424:role/projects/NOTEBOOK-SERVER-staging-us1-ScottNotebook-2MCJMXG4J5EK/NOTEBOOK-SERVER-staging-us1-ScottNote-TrainingRole-12FVWKLY7ZLZ1',
+        max_instance_count=1,
+    ) as transformer:
+        features_path = transformer.load_features(
+            [
+                {'body': 'hello'},
+                {'body': 'hello'},
+                {'body': 'hello'},
+            ]
+        )
+        transformer.transform(features_path)
+Note that the output of the batch transform will be stored in the bucket you provided to bucket_name and is not directly available in the BatchTransformer object.
+
+Under the Hood
+This extractor has multiple processing steps:
+
+Transform data (SparkSQL) into an Adroit-compatible request and persist to S3
+Build inferences lazily through AWS Sagemaker BatchTransform and persist to S3
+Stitch requests and responses together. To match files correctly, we assume BatchTransform writes output data in this format: {request_filename}.out. Its purpose is to establish a relation to a request and response.
+Using previous json blobs provided from steps 1 and 2, infer its schema and unpack the stitched dataset using their structs. Explode requests and responses independently and attach a batch_index. Given a row_id and batch_index relation (since requests and responses are 1:1), we can inner join over position and row_id.
+Q/A
+Q: How do I speed up my inferences Bridge job?
+
+A: This can be achieved by increasing max_instance_count to an extent. This is because requests file objects are created via Spark and sent to S3. Sagemaker BatchTransform can only distribute requests at an S3-object-level per instance. Hence, the maximum parallelization that's achievable is the number of S3 objects created. The maximum parallelization by counting the number of S3 objects that end up getting created from your query.
+
+Let's take an example from nct_services_subsystem_predictions. We can query the number of files created using the aws-cli. In this temporary directory, we observe 2 files being created, so the maximum parallelization achieveable caps out at 2.
+
+» AWS_PROFILE=bi aws s3 ls s3://prd-dwhlatest-text.datalake.nextdoor.com/tmp__/adroit/features/prd/bridge__1days/nct_services_subsystem_predictions.from_adroit/20210427000000/
+2021-04-27 18:48:27   17199056 part-00000-b73c81b4-24a6-4301-90be-0223f5604793-c000.json
+2021-04-27 18:48:28   14684843 part-00000-b73c81b4-24a6-4301-90be-0223f5604793-c001.json
+You can also configure request_file_size_mb to generate smaller files which then allows for a larger max_instance_count config --> more parallelism.
+
+Consider tuning request_batch_size (default=5) for smaller features payloads in the extract section. This setting submits more features per batch request.
+
+Q: merge_features_and_results is taking forever and I'm getting rate limited by AWS.
+
+A: Strongly consider outputting the features needed for batch inference as part of the model response in the handler. This will be a lot more efficient.
+
+Q: I'm getting various MLFlowExceptions / Algorithm Errors in Sagemaker
+
+A: Make sure your model works locally in a flask server on a representative input of the dataset. Make sure your model handles null values properly, or coalesce/filter out those values in the dataset.
+
+For more questions
+Please reach out to @coreml on the #adroit Slack channel.

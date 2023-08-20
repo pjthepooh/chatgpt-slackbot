@@ -1,0 +1,92 @@
+Want to see Konductor in action? Visit go/ak.
+
+Now that Adroit is fully on-boarded to Kubernetes, our CI/CD has grown in complexity to coordinate tasks between at least three/four different systems:
+
+CircleCI and Github Actions for code-quality, docker image building and testing
+ArgoCD for pull-based Kubernetes deployments and * Argo workflows for deployment verification
+We are using Konductor to coordinate between these systems, accelerate the deployment cycle and enable full-spectrum visibility into deployment health.
+
+This document goes over the fundamentals of Konductor and how it applies to Adroit.
+
+Konductor overview
+Konductor is a CI coordinator. That means it is not involved in scheduling jobs on compute. Rather, it's job is to cleverly enqueue jobs from the task graph, run them on otherCI systems and aggregate the results.
+
+The task graph, or "step dependency definition," is located at locomotive/sdd.yaml . The semantics are make-like. Each task has its dependencies listed as a child. To perform a staging deploy, all tasks/dependencies under the complete-verification key must be completed. Ditto complete-deploy for production deploys.
+
+Konductor has no database. Git itself is both the store of state and the message broker -- specficially, tags are used to enqueue jobs and commicate success/failure states. How so?
+
+For example, say we had the following SDD and were starting a staging deploy.
+
+unit-tests: []  # unit-tests, itself, has no dependencies
+complete-verification:
+ - unit-tests
+In order to complete the deploy, the unit-tests job must be run. To do so, Konductor pushes a tag to Github like so: release=<TRAIN NUMBER>.0=unit-tests.<UNIQUE JOB ID>
+
+To have the test be run, another CI system must be configured to run jobs upon tags being pushed. For example, in CircleCI, it would look like this:
+
+workflows:
+  code-quality-workflow:
+    jobs:
+      - unit-tests:
+          filters:
+            tags:
+              only:
+                - /^release=\d+\.\d+=unit-tests\.\d+$/
+            branches:
+              ignore: /.*/
+In turn, the step must be configured to communicate with Konductor via Git tags. This is accomplished with a tool called locomotive. It creates tags like release=<TRAIN NUMBER>.0=unit-tests.<UNIQUE JOB ID>=started or =success or =failure.
+
+Practically speaking, this will be done through CircleCI orbs configured like so:
+
+jobs:
+  unit-tests:
+    docker:
+      - image: cimg/python:3.10
+    steps:
+      - nd/locomotive-on-start # 👈 here...
+      - checkout
+      - run: |
+      		pytest
+      - nd/locomotive-on-end # 👈 ...and here
+These are just scripts that bootstrap the locomotive CLI and run:
+
+  locomotive set-step-state \
+    --state-name=started \
+    --triggering-tag="${CIRCLE_TAG}" \
+    --info-string="job_url:${CIRCLE_BUILD_URL}" \
+    --sha "${CIRCLE_SHA1}
+When all the dependencies for a particular job have a corresponding release=<TRAIN NUMBER>.0=unit-tests.<UNIQUE JOB ID>=success, the next job is started. This continues until the task graph has been fully traversed.
+
+Adding a new component to Konductor
+To review, to add a component to Konductor, the follow steps must be taken:
+
+ Find the apropriate place in the task graph, sdd.yaml
+ Add the locomotive calls
+ Add the tag filter
+CI components overview
+There are three components to the CI system: feature branches, staging deployments and production deployments. Konductor manages staging and production deployments.
+
+Feature branches
+Each pull request runs certain jobs, without supervision by Konductor, including linting, unit tests and docker image building. These are all part of the CircleCI verify workflow.
+
+Staging deployments
+To deploy the staging deployment, Konductor determines and runs the leafs of the task graph. (These are all the steps connected to complete-verification without their own dependencies.)
+
+Mostly these are docker build steps and code quality steps, except for deploy_serving_staging_k8s . This is a special step that generates the Kubernetes manifests for the Argo deployment and commit them to a dangling commit labeled with the staging-k8s tag. Argo is configured to deploy the manifests in this tag. It automatically reconciles the differences in the cluster compared to the desired state specified in the code-generated manifests.
+
+How do we know if this reconciliation is successful? We use an Argo workflow that waits for the application to be healthy and synchronized. Because a Kubernetes job cannot inquire about the status of applications outside of its namespace, there is one workflow per namespace.
+
+It is not strictly necessary for this to be an Argo workflow, but by doing so we are able to schedule nodes with the same IAM scopes. This makes things easier for CloudEng.
+
+Konductor synthesizes the success and failure states of both our pull-based CI systems (Argo) and our push-based CI systems (GHA and CircleCI) in a convenient interface. It is therefore the best way and preferred way to monitor the overall success or failure of deployments.
+
+Production
+Production is identical to staging, except for the require-manual-unblock-before-prod-deploy step. This step blocks the train until the train engineer attests that new flavors have been manually verified. This step only happens when flavors.yaml has been changed.
+
+Otherwise:
+
+deploy_serving_staging_k8s ➡️ deploy_serving_prod_k8s
+staging-k8s ➡️ k8s-production
+Additional resources
+July 7th, 2023 :: Show & Tell
+July 12th, 2023 :: Konductor, k8s and your repo

@@ -1,0 +1,17 @@
+Overview
+Adroit endpoints currently use JSON as their input/output format. In general, JSON compresses extremely well so by enabling request payload compression we can get substantial savings on network bandwidth usage.
+
+We saw a $850/D cost saving by turning on request compression for the notifications and feature log endpoints.
+
+Request compression support is included by default in the MLflow handler. This guide details the steps to turn on compression for a flavor.
+
+Note: this only applies to MLflow models, not legacy Adroit. We recommend moving any important legacy models over to use MLflow to get the benefits of request compression.
+
+Instructions
+If you are using the MLflow handler directly, then no changes are necessary on the Adroit side. Otherwise if you are subclassing it, make sure that the handle() method is not overridden since that's where the decompression logic lives (override the _handle() method to add custom business logic instead).
+
+If you are making Adroit calls from the monolith, use the compress_payload=True argument in the Adroit client's get_predictions_async method to enable compression (https://github.com/Nextdoor/nextdoor.com/blob/main/apps/nextdoor/util/adroit/client.py#L783).
+
+If you are calling from another source then the client there will need to be updated to support ZSTD compression.
+
+Note: the decompression logic on the Adroit side is backwards-compatible so it is safe to have a model where compression is supported before turning on client-side compression.

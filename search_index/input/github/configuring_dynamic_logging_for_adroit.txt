@@ -1,0 +1,22 @@
+Background
+For additional background, please refer to: Dynamic Logging User Guide,
+
+What is dynamic logging and where is the tool?
+This tool accessible at go/loglevels. Dynamic logging allows you to change the level of a logger. You can use it to temporarily disable a noisy logger or turn on debug logs in staging/production. Please note that these overrides are global.
+
+Most of our services have a log level of INFO by default. If you wanted to only log errors, you would set an override with level ERROR. If you wanted to enable debug logs, you would set the override level to DEBUG.
+
+What log levels are supported?
+Python: CRITICAL, ERROR, WARN, INFO, DEBUG. Go: ERROR, INFO, DEBUG. If you set an override with any other level, it will not be applied.
+
+How do I configure it for Adroit?
+Flavor Pattern: {flavor_name}
+
+Service: Adroit
+
+Logger Name: The logger name is equivalent to the module name, assuming that you instantiate the logger with logging.getLogger(__name__).
+
+Example:
+
+Screen Shot 2023-03-10 at 2 38 35 PM
+

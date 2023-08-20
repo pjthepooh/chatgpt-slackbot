@@ -1,0 +1,94 @@
+{
+	"title": {
+		"type": "plain_text",
+		"text": "ML Help Request",
+		"emoji": true
+	},
+	"submit": {
+		"type": "plain_text",
+		"text": "Submit",
+		"emoji": true
+	},
+	"type": "modal",
+	"callback_id": "ml_help",
+	"blocks": [
+		{
+			"type": "input",
+			"block_id": "block1",
+			"label": {
+				"type": "plain_text",
+				"text": "What's the Priority?",
+				"emoji": true
+			},
+			"element": {
+				"type": "plain_text_input",
+				"action_id": "priority"
+			}
+		},
+		{
+			"type": "input",
+			"block_id": "block2",
+			"label": {
+				"type": "plain_text",
+				"text": "Is this an infrastructure or modeling question?",
+				"emoji": true
+			},
+			"element": {
+				"type": "plain_text_input",
+				"action_id": "infra_model"
+			}
+		},
+		{
+			"type": "input",
+			"block_id": "block3",
+			"label": {
+				"type": "plain_text",
+				"text": "What service is this request for?",
+				"emoji": true
+			},
+			"element": {
+				"type": "plain_text_input",
+				"action_id": "service_type"
+			}
+		},
+		{
+			"type": "input",
+			"block_id": "block4",
+			"label": {
+				"type": "plain_text",
+				"text": "Have you consulted the FAQ? go/mlhelpfaq",
+				"emoji": true
+			},
+			"element": {
+				"type": "plain_text_input",
+				"action_id": "mlfaq"
+			}
+		},
+		{
+			"type": "input",
+			"block_id": "block5",
+			"element": {
+				"action_id": "input",
+				"type": "plain_text_input"
+			},
+			"label": {
+				"type": "plain_text",
+				"text": "Request",
+				"emoji": true
+			}
+		},
+		{
+			"type": "input",
+			"block_id": "block6",
+			"element": {
+				"action_id": "input",
+				"type": "plain_text_input"
+			},
+			"label": {
+				"type": "plain_text",
+				"text": "channel_id",
+				"emoji": true
+			}
+		}
+	]
+}
